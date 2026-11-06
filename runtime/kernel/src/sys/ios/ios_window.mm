@@ -240,6 +240,7 @@ static std::vector<std::string> ios_BuildArgs(NSString* pGameDir) {
 @property (nonatomic, copy)   NSString* gameDir;
 @property (nonatomic) BOOL started;
 - (void)showMessage:(NSString*)text;
+- (void)startEngine;
 @end
 
 @implementation LTIOSViewController
@@ -296,6 +297,13 @@ static std::vector<std::string> ios_BuildArgs(NSString* pGameDir) {
     [super viewDidAppear:animated];
     if (self.started || !self.gameDir) return;
     self.started = YES;
+    // One turn of the run loop later, so the launch has finished first: the
+    // engine's start loads the archives and takes a while, and iOS ends an app
+    // whose launch takes too long.
+    dispatch_async(dispatch_get_main_queue(), ^{ [self startEngine]; });
+}
+
+- (void)startEngine {
     [self.view layoutIfNeeded];
     [g_pMetalView layoutIfNeeded];
 
