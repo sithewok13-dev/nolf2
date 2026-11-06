@@ -123,38 +123,14 @@ static void LTMacClient_TickTestConsole(void)
     c_CommandHandler(pCmd);
 }
 
-extern "C" int main(int argc, char** argv)
+// --------------------------------------------------------------------------
+// The engine's start, frame and stop, shared by the macOS main() below and the
+// iOS app (ios_window.mm), which cannot run a blocking loop of its own: UIKit
+// owns the main thread there, and a CADisplayLink calls LTMacClient_Step()
+// once per screen refresh instead. The window must exist before the start.
+// --------------------------------------------------------------------------
+extern "C" bool LTMacClient_Start(int argc, char** argv)
 {
-    // Window size in POINTS. On a Retina display the GL drawable is 2x this
-    // (LTMacWin_GetSize reports backing pixels, and the whole pipeline —
-    // viewport, camera rect, 2D ortho — follows it), so 1280x960 points renders
-    // at 2560x1920. Override with LT_WINDOW_SIZE=WxH.
-    //
-    // NOTE: this is NOT yet driven by the retail config's screenwidth/height
-    // (autoexec.cfg asks for 1600x1200) — the console vars aren't loaded until
-    // g_pClientMgr->Init() below, which happens after the window exists.
-    int nWinW = 1280, nWinH = 960;
-    {
-        const char *pSize = getenv("LT_WINDOW_SIZE");
-        int w = 0, h = 0;
-        if (pSize && sscanf(pSize, "%dx%d", &w, &h) == 2 && w > 0 && h > 0)
-        {
-            nWinW = w;
-            nWinH = h;
-        }
-    }
-    // FULLSCREEN IS THE DEFAULT (this is a 2002 FPS, not a windowed app): a
-    // borderless screen-sized window with the menu bar and Dock hidden.
-    // LT_WINDOWED=1 gives a normal window back -- which is what the automated
-    // runs and frame dumps use. The drawable size flows back to the engine
-    // through nr_Init either way, so the camera rect and 2D layout follow.
-    bool bFullscreen = (getenv("LT_WINDOWED") == NULL);
-
-    fprintf(stderr, "[mac] LTMacWin_Create %dx%d (points)%s...\n",
-            nWinW, nWinH, bFullscreen ? " FULLSCREEN" : "");
-    if (!LTMacWin_Create("Lithtech (NOLF2)", nWinW, nWinH, bFullscreen))
-        return 1;
-
     // --- Engine startup (mirrors Win32 RunClientApp + StartClient). ---
 
     // Command line. The -rez / -config scanning in the engine tolerates argv[0]
@@ -168,7 +144,7 @@ extern "C" int main(int argc, char** argv)
     {
         fprintf(stderr, "[mac] dsi_Init FAILED\n");
         LTMacWin_Destroy();
-        return 1;
+        return false;
     }
 
     // Create the client manager (g_pClientMgr = new CClientMgr).
@@ -214,20 +190,23 @@ extern "C" int main(int argc, char** argv)
     }
 
     if (initResult != LT_OK)
-    {
         fprintf(stderr, "[mac] CClientMgr::Init FAILED (0x%X)\n", (unsigned)initResult);
-    }
     else
-    {
         fprintf(stderr, "[mac] CClientMgr::Init OK — entering frame loop\n");
-        while (LTMacClient_FrameTick())
-        {
-            LTMacClient_TickTestConsole();
-            if (g_pClientMgr->Update() != LT_OK)
-                break;
-        }
-    }
+    return initResult == LT_OK;
+}
 
+// One frame. False once the engine wants to stop (Quit, or a failed update).
+extern "C" bool LTMacClient_Step(void)
+{
+    if (!LTMacClient_FrameTick())
+        return false;
+    LTMacClient_TickTestConsole();
+    return g_pClientMgr->Update() == LT_OK;
+}
+
+extern "C" void LTMacClient_Stop(void)
+{
     // Shutdown (mirrors END_MAINLOOP).
     fprintf(stderr, "[mac] shutting down...\n");
 
@@ -239,6 +218,56 @@ extern "C" int main(int argc, char** argv)
     }
     dsi_Term();
     LTMacWin_Destroy();
+
+    fflush(stdout);
+    fflush(stderr);
+}
+
+#ifndef LT_IOS
+extern "C" int main(int argc, char** argv)
+{
+    // Window size in POINTS. On a Retina display the GL drawable is 2x this
+    // (LTMacWin_GetSize reports backing pixels, and the whole pipeline —
+    // viewport, camera rect, 2D ortho — follows it), so 1280x960 points renders
+    // at 2560x1920. Override with LT_WINDOW_SIZE=WxH.
+    //
+    // NOTE: this is NOT yet driven by the retail config's screenwidth/height
+    // (autoexec.cfg asks for 1600x1200) — the console vars aren't loaded until
+    // g_pClientMgr->Init() below, which happens after the window exists.
+    int nWinW = 1280, nWinH = 960;
+    {
+        const char *pSize = getenv("LT_WINDOW_SIZE");
+        int w = 0, h = 0;
+        if (pSize && sscanf(pSize, "%dx%d", &w, &h) == 2 && w > 0 && h > 0)
+        {
+            nWinW = w;
+            nWinH = h;
+        }
+    }
+    // FULLSCREEN IS THE DEFAULT (this is a 2002 FPS, not a windowed app): a
+    // borderless screen-sized window with the menu bar and Dock hidden.
+    // LT_WINDOWED=1 gives a normal window back -- which is what the automated
+    // runs and frame dumps use. The drawable size flows back to the engine
+    // through nr_Init either way, so the camera rect and 2D layout follow.
+    bool bFullscreen = (getenv("LT_WINDOWED") == NULL);
+
+    fprintf(stderr, "[mac] LTMacWin_Create %dx%d (points)%s...\n",
+            nWinW, nWinH, bFullscreen ? " FULLSCREEN" : "");
+    if (!LTMacWin_Create("Lithtech (NOLF2)", nWinW, nWinH, bFullscreen))
+        return 1;
+
+    if (LTMacClient_Start(argc, argv))
+    {
+        while (LTMacClient_Step())
+        {
+        }
+    }
+    else if (!g_pClientMgr)
+    {
+        return 1;   // dsi_Init failed (the window is already gone)
+    }
+
+    LTMacClient_Stop();
 
     // ⚠️ _exit, NOT return: skip the C++ STATIC DESTRUCTORS of the game dylibs.
     //
@@ -256,7 +285,6 @@ extern "C" int main(int argc, char** argv)
     // early-out. Fixing the shell's dangling handles is game-code surgery for no
     // gain: every teardown that matters (world, sound device, config, files) has
     // already run in Term()/dsi_Term(), so there is nothing left to flush.
-    fflush(stdout);
-    fflush(stderr);
     _exit(0);
 }
+#endif // !LT_IOS

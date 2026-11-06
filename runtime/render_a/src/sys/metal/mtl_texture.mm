@@ -23,6 +23,7 @@
 #include "renderstruct.h"
 #include "mtl_texture.h"
 #include "mtl_device.h"
+#include "sys/shared/render_dxt.h"  // CPU DXT -> BGRA8, for GPUs without BC formats
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -239,6 +240,13 @@ static id<MTLTexture> mtltex_Create(SharedTexture *pTexture, uint32 &nOutBytes,
 	// feature and absent on Apple-GPU iOS-family devices. Every Apple silicon
 	// Mac has it, but check rather than assume -- and say so loudly, because
 	// the symptom otherwise is "most of the art is untextured" with no clue.
+	//
+	// ★ iOS: iPhones and pre-M1 iPads have no BC formats, so the DXT data is
+	// decoded to BGRA8 on the CPU instead (render_dxt.cpp). Four times the
+	// memory of the compressed texture, but it draws. nBlockDim stays 4 for the
+	// mip-chain rules below (the file's DXT mips are still block data); only the
+	// uploaded format and row size change.
+	ERenderDXT eDecodeDXT = (ERenderDXT)0;
 	if (nBlockDim == 4 && !dev.supportsBCTextureCompression)
 	{
 		static bool s_bWarned = false;
@@ -246,9 +254,11 @@ static id<MTLTexture> mtltex_Create(SharedTexture *pTexture, uint32 &nOutBytes,
 		{
 			s_bWarned = true;
 			fprintf(stderr, "[mtltex] device does not support BC texture compression"
-			                " -- DXT textures will draw untextured\n");
+			                " -- decoding DXT textures on the CPU\n");
 		}
-		return nil;
+		eDecodeDXT = (eBPP == BPP_S3TC_DXT1) ? RENDER_DXT1
+		           : (eBPP == BPP_S3TC_DXT3) ? RENDER_DXT3 : RENDER_DXT5;
+		eFormat    = MTLPixelFormatBGRA8Unorm;
 	}
 
 	// ★ CUBE ENVIRONMENT MAPS (TexFX\Cubic\*). dtx_Create lays the six faces end
@@ -319,8 +329,10 @@ static id<MTLTexture> mtltex_Create(SharedTexture *pTexture, uint32 &nOutBytes,
 		const TextureMipData &cMip = pData->m_Mips[nMip];
 		const uint32 nBlocksW  = (cMip.m_Width  + nBlockDim - 1) / nBlockDim;
 		const uint32 nBlocksH  = (cMip.m_Height + nBlockDim - 1) / nBlockDim;
-		const uint32 nRowBytes = (nBlockDim == 4) ? nBlocksW * nBlockSz
-		                                          : cMip.m_Width * 4;
+		const uint32 nRowBytes = (nBlockDim == 4 && !eDecodeDXT) ? nBlocksW * nBlockSz
+		                                                         : cMip.m_Width * 4;
+		// Rows per image for a cube face: block rows, or pixel rows once decoded.
+		const uint32 nImageRows = eDecodeDXT ? cMip.m_Height : nBlocksH;
 
 		for (uint32 nFace = 0; nFace < nFaces; ++nFace)
 		{
@@ -335,6 +347,14 @@ static id<MTLTexture> mtltex_Create(SharedTexture *pTexture, uint32 &nOutBytes,
 					continue;
 				pFace = pTemp;
 			}
+			else if (eDecodeDXT)
+			{
+				pTemp = (uint8*)malloc((size_t)cMip.m_Width * cMip.m_Height * 4);
+				if (!pTemp)
+					continue;
+				RenderDXT_Decode(eDecodeDXT, pFace, cMip.m_Width, cMip.m_Height, pTemp);
+				pFace = pTemp;
+			}
 
 			MTLRegion region = MTLRegionMake2D(0, 0, cMip.m_Width, cMip.m_Height);
 			if (bCube)
@@ -344,7 +364,7 @@ static id<MTLTexture> mtltex_Create(SharedTexture *pTexture, uint32 &nOutBytes,
 				             slice:nFace
 				         withBytes:pFace
 				       bytesPerRow:nRowBytes
-				     bytesPerImage:(NSUInteger)nRowBytes * nBlocksH];
+				     bytesPerImage:(NSUInteger)nRowBytes * nImageRows];
 			}
 			else
 			{

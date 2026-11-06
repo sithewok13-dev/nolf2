@@ -51,6 +51,18 @@ set(CMAKE_C_STANDARD 11)
 # we join that path on macOS and special-case the genuinely Linux-only bits via
 # __APPLE__ (predefined by clang). LT_MACOS marks our own divergences.
 add_compile_definitions(_LINUX __LINUX LT_MACOS)
+
+# ★ iOS / iPadOS (LT_IOS). The same port, built for the iPhone SDK: configure
+# with -DCMAKE_SYSTEM_NAME=iOS (see .github/workflows/ios.yml). LT_MACOS stays
+# defined -- everything below the window layer is shared -- and LT_IOS marks
+# the few places that differ: the UIKit shell (runtime/kernel/src/sys/ios), the
+# RemoteIO sound output, and the CPU DXT decode for GPUs without BC formats.
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+	set(LT_IOS ON)
+	add_compile_definitions(LT_IOS)
+else()
+	set(LT_IOS OFF)
+endif()
 add_compile_definitions($<IF:$<CONFIG:Debug>,_DEBUG,_FINAL>)
 # Retail parity: NOLF2 shipped with assert() compiled out. The game code is full
 # of diagnostic asserts (e.g. LTStrCpy truncation) that abort our build but were
@@ -125,8 +137,13 @@ add_subdirectory(${ROOT}/runtime/server ${CMAKE_BINARY_DIR}/server)
 add_subdirectory(${ROOT}/runtime/client ${CMAKE_BINARY_DIR}/client)
 
 # --- macOS platform shell: Cocoa + Metal window + client bridge ---
+if(LT_IOS)
+	set(LT_WINDOW_SOURCE ${ROOT}/runtime/kernel/src/sys/ios/ios_window.mm)   # UIKit app + display link
+else()
+	set(LT_WINDOW_SOURCE ${ROOT}/runtime/kernel/src/sys/macos/macos_window.mm)
+endif()
 target_sources(EXE_Lithtech PRIVATE
-    ${ROOT}/runtime/kernel/src/sys/macos/macos_window.mm
+    ${LT_WINDOW_SOURCE}
     ${ROOT}/runtime/kernel/src/sys/macos/macos_input.mm          # NSEvent keyboard/mouse
     ${ROOT}/runtime/kernel/src/sys/macos/macos_client.cpp
     ${ROOT}/runtime/kernel/src/sys/macos/macos_clientshell.cpp   # null IClientShell (Phase 1 bring-up)
@@ -147,6 +164,7 @@ target_sources(EXE_Lithtech PRIVATE
     ${ROOT}/runtime/render_a/src/sys/shared/render_drawprim.cpp # CRenderDrawPrim — the neutral ILTDrawPrim base
     ${ROOT}/runtime/render_a/src/sys/shared/render_polygrid.cpp       # OT_POLYGRID (water, ice) height-field draw
     ${ROOT}/runtime/render_a/src/sys/shared/render_particles.cpp      # OT_PARTICLESYSTEM (fire, smoke, waterfall)
+    ${ROOT}/runtime/render_a/src/sys/shared/render_dxt.cpp        # CPU DXT1/3/5 -> BGRA8 (GPUs without BC: iPhones)
     ${ROOT}/runtime/sound/src/sys/macos/s_coreaudio.cpp       # Phase-3 CoreAudio ILTSoundSys (registers the sound factory)
     ${ROOT}/runtime/render_b/src/sys/d3d/d3dtexinterface.cpp) # ILTTexInterface (renderer-agnostic; console font/UI textures)
 # ⚠️⚠️ TARGET_DIRECTORY IS LOAD-BEARING, NOT DECORATION. Source-file properties
@@ -167,6 +185,12 @@ set_source_files_properties(
     ${ROOT}/runtime/render_a/src/sys/metal/mtl_model.mm
     TARGET_DIRECTORY EXE_Lithtech
     PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+# The iOS shell is new code written for ARC (it holds UIKit objects in globals).
+if(LT_IOS)
+	set_source_files_properties(${ROOT}/runtime/kernel/src/sys/ios/ios_window.mm
+		TARGET_DIRECTORY EXE_Lithtech
+		PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+endif()
 # macos_window.mm / macos_input.mm are DELIBERATELY NOT in that list. They were
 # written against the same (never-applied) line and have run as manual
 # retain/release for the whole port, correctly -- AppKit owns the window and the
@@ -188,11 +212,18 @@ target_include_directories(EXE_Lithtech PRIVATE
     ${ROOT}/runtime/render_b/src/sys/d3d)  # d3dtexinterface.h
 # CoreText/CoreGraphics: CUIVectorFont rasterizes the game's TTF UI fonts
 # (runtime/ui/src/cuivectorfont.cpp — the macOS replacement for Win32 GDI).
-target_link_libraries(EXE_Lithtech "-framework Cocoa"
-                                   "-framework Metal" "-framework QuartzCore"
-                                   "-framework CoreText" "-framework CoreGraphics"
-                                   "-framework AudioToolbox" "-framework AudioUnit"
-                                   "-framework CoreAudio")
+if(LT_IOS)
+	target_link_libraries(EXE_Lithtech "-framework UIKit" "-framework Foundation"
+	                                   "-framework Metal" "-framework QuartzCore"
+	                                   "-framework CoreText" "-framework CoreGraphics"
+	                                   "-framework AudioToolbox" "-framework AVFoundation")
+else()
+	target_link_libraries(EXE_Lithtech "-framework Cocoa"
+	                                   "-framework Metal" "-framework QuartzCore"
+	                                   "-framework CoreText" "-framework CoreGraphics"
+	                                   "-framework AudioToolbox" "-framework AudioUnit"
+	                                   "-framework CoreAudio")
+endif()
 
 # --- Game DLLs (Phase 3): the real game logic the engine loads. NOLF2 = "TO2". ---
 add_subdirectory(${ROOT}/NOLF2/ObjectDLL/TO2 ${CMAKE_BINARY_DIR}/ObjectDLL)  # -> Object.lto (server game logic)
@@ -404,4 +435,61 @@ if(CMAKE_GENERATOR STREQUAL "Xcode")
 				"$<TARGET_BUNDLE_CONTENT_DIR:NOLF2Launcher>/Resources/NOLF2_Background.jpg"
 			COMMENT "Adding launcher background artwork")
 	endif()
+endif()
+
+# ---------------------------------------------------------------------------
+# NOLF2.app for iOS / iPadOS (LT_IOS) -- the target CI builds and packages.
+#
+#     cmake --build build-ios --target NOLF2_iOS_App
+#
+# Laid out by hand, like the JK port does (no Xcode project): an iOS bundle is
+# flat -- the engine, Info.plist and Frameworks/ sit at the top level. The three
+# game modules go in Frameworks/ under .dylib names (libObject.lto is renamed:
+# sideloading tools re-sign the Mach-O files they recognise, by extension), and
+# ios_window.mm points the engine at them with the same LT_*_MODULE variables
+# the macOS launcher sets. Signed ad hoc only; the player's sideloading tool
+# signs it for real. No game files go in the bundle, ever.
+# ---------------------------------------------------------------------------
+if(LT_IOS)
+	# CMake makes iOS executables bundles by default; this one is assembled below.
+	set_target_properties(EXE_Lithtech PROPERTIES MACOSX_BUNDLE FALSE)
+
+	if(DEFINED ENV{IOS_BUNDLE_ID} AND NOT "$ENV{IOS_BUNDLE_ID}" STREQUAL "")
+		set(IOS_BUNDLE_ID "$ENV{IOS_BUNDLE_ID}")
+	else()
+		set(IOS_BUNDLE_ID "io.github.sithewok13.nolf2")
+	endif()
+	# CFBundleShortVersionString: the port's own version. CFBundleVersion: CI's
+	# run number, so sideloading tools can tell builds apart.
+	set(IOS_VERSION "0.1")
+	if(DEFINED ENV{IOS_BUNDLE_VERSION} AND NOT "$ENV{IOS_BUNDLE_VERSION}" STREQUAL "")
+		set(IOS_BUNDLE_VERSION "$ENV{IOS_BUNDLE_VERSION}")
+	else()
+		set(IOS_BUNDLE_VERSION "1")
+	endif()
+	set(IOS_RELEASE_TAG "$ENV{IOS_RELEASE_TAG}")
+	execute_process(COMMAND git rev-parse --short HEAD
+		WORKING_DIRECTORY ${ROOT} OUTPUT_VARIABLE IOS_COMMIT
+		OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+	configure_file(${CMAKE_CURRENT_SOURCE_DIR}/ios/Info.plist.in
+	               ${CMAKE_BINARY_DIR}/ios/Info.plist @ONLY)
+
+	set(IOS_APP ${CMAKE_BINARY_DIR}/NOLF2.app)
+	add_custom_target(NOLF2_iOS_App
+		COMMAND rm -rf ${IOS_APP}
+		COMMAND mkdir -p ${IOS_APP}/Frameworks
+		COMMAND cp $<TARGET_FILE:EXE_Lithtech> ${IOS_APP}/Lithtech
+		COMMAND cp ${CMAKE_BINARY_DIR}/ios/Info.plist ${IOS_APP}/Info.plist
+		COMMAND cp $<TARGET_FILE:NOLF2_ClientShellDLL> ${IOS_APP}/Frameworks/libCShell.dylib
+		COMMAND cp $<TARGET_FILE:NOLF2_ObjectDLL>      ${IOS_APP}/Frameworks/libObject.dylib
+		COMMAND cp $<TARGET_FILE:NOLF2_ClientFXDLL>    ${IOS_APP}/Frameworks/libClientFx.dylib
+		# Inside out: the embedded code first, then the bundle.
+		COMMAND codesign --force --sign - --timestamp=none ${IOS_APP}/Frameworks/libCShell.dylib
+		COMMAND codesign --force --sign - --timestamp=none ${IOS_APP}/Frameworks/libObject.dylib
+		COMMAND codesign --force --sign - --timestamp=none ${IOS_APP}/Frameworks/libClientFx.dylib
+		COMMAND codesign --force --sign - --timestamp=none ${IOS_APP}
+		COMMENT "Assembling NOLF2.app"
+		VERBATIM)
+	add_dependencies(NOLF2_iOS_App
+		EXE_Lithtech NOLF2_ObjectDLL NOLF2_ClientShellDLL NOLF2_ClientFXDLL)
 endif()

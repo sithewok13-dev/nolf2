@@ -376,12 +376,15 @@ void MTLDev_EndFrame(void)
     // ⚠️ A drawable texture is MANAGED on a discrete-GPU Mac, so getBytes there
     // reads a stale CPU copy unless the GPU writes are synchronised back first.
     // Apple silicon (this port's target) has unified memory and needs neither.
+    // (iOS: always unified memory, and -synchronizeResource: does not exist.)
+#ifndef LT_IOS
     if (!g_Device.hasUnifiedMemory)
     {
         id<MTLBlitCommandEncoder> blit = [g_CmdBuf blitCommandEncoder];
         [blit synchronizeResource:g_Drawable.texture];
         [blit endEncoding];
     }
+#endif
 
     __block dispatch_semaphore_t sem = g_FrameSem;
     [g_CmdBuf addCompletedHandler:^(id<MTLCommandBuffer> cb) {

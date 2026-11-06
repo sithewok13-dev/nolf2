@@ -71,6 +71,15 @@ void LTMacInput_TickHold(void);   // LT_TEST_HOLD_DIK
 // Drop all held keys/buttons (focus loss, ClearInput).
 void LTMacInput_ClearAll(void);
 
+// --- Added for iOS: input that does not come from an NSEvent -------------
+// One key, as a Windows VK code (menu queue) and a PC DIK scancode (gameplay
+// state); either may be 0.
+void LTMacInput_InjectKey(unsigned int nVK, unsigned int nDIK, bool bDown);
+// A mouse button held / released: 0 = left, 1 = right, 2 = middle.
+void LTMacInput_SetMouseButton(unsigned int nButton, bool bDown);
+// Relative mouse motion in pixels, added to what ConsumeMouseDelta returns.
+void LTMacInput_AddMouseDelta(float fDX, float fDY);
+
 #ifdef __cplusplus
 }
 #endif

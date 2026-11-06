@@ -7,7 +7,14 @@
 //
 // ----------------------------------------------------------------------- //
 
+// iOS (LT_IOS): the same key tables and state, without AppKit. NSEvent does
+// not exist there; touches and the iOS keyboard reach this file through
+// LTMacInput_InjectKey / LTMacInput_SetMouseButton instead (ios_window.mm).
+#ifdef LT_IOS
+#import <Foundation/Foundation.h>
+#else
 #import <Cocoa/Cocoa.h>
+#endif
 #include "macos_input.h"
 #include <string.h>
 #include <stdio.h>
@@ -146,7 +153,9 @@ static float g_fMouseDX = 0.0f, g_fMouseDY = 0.0f;
 static bool  g_aMouseDown[3];
 
 // Previous modifier flags, to synthesise key up/down from flagsChanged.
+#ifndef LT_IOS
 static NSUInteger g_nPrevFlags = 0;
+#endif
 
 static void input_PushKeyDown(unsigned int nVK, unsigned int nRepeat)
 {
@@ -169,6 +178,7 @@ static void input_PushKeyUp(unsigned int nVK)
 // Event handling
 // --------------------------------------------------------------------------
 
+#ifndef LT_IOS
 bool LTMacInput_HandleEvent(void *pNSEvent)
 {
 	input_BuildTables();
@@ -271,6 +281,35 @@ bool LTMacInput_HandleEvent(void *pNSEvent)
 			break;
 	}
 	return false;
+}
+#else
+bool LTMacInput_HandleEvent(void *pNSEvent) { (void)pNSEvent; return false; }
+#endif
+
+// Added for iOS: feed one key by its Windows VK code and PC DIK scancode, the
+// two forms the engine reads (see macos_input.h). Either may be 0.
+void LTMacInput_InjectKey(unsigned int nVK, unsigned int nDIK, bool bDown)
+{
+	if (bDown)
+		input_PushKeyDown(nVK, 0);
+	else
+		input_PushKeyUp(nVK);
+	if (nDIK && nDIK < DIK_STATE_SIZE)
+		g_aDIKDown[nDIK] = bDown;
+}
+
+// Added for iOS: a mouse button held or released (0 left, 1 right, 2 middle).
+void LTMacInput_SetMouseButton(unsigned int nButton, bool bDown)
+{
+	if (nButton < 3)
+		g_aMouseDown[nButton] = bDown;
+}
+
+// Added for iOS: relative mouse motion, in pixels (a look drag).
+void LTMacInput_AddMouseDelta(float fDX, float fDY)
+{
+	g_fMouseDX += fDX;
+	g_fMouseDY += fDY;
 }
 
 // --------------------------------------------------------------------------

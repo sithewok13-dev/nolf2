@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>NOLF2</string>
+	<key>CFBundleDisplayName</key>
+	<string>NOLF2</string>
+	<key>CFBundleExecutable</key>
+	<string>Lithtech</string>
+	<key>CFBundleIdentifier</key>
+	<string>@IOS_BUNDLE_ID@</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>@IOS_VERSION@</string>
+	<key>CFBundleVersion</key>
+	<string>@IOS_BUNDLE_VERSION@</string>
+	<!-- The release tag CI built this for (empty for test builds) and the
+	     commit, for the version readout and bug reports. -->
+	<key>NOLF2Release</key>
+	<string>@IOS_RELEASE_TAG@</string>
+	<key>NOLF2Commit</key>
+	<string>@IOS_COMMIT@</string>
+	<key>CFBundleSupportedPlatforms</key>
+	<array>
+		<string>iPhoneOS</string>
+	</array>
+	<key>MinimumOSVersion</key>
+	<string>@CMAKE_OSX_DEPLOYMENT_TARGET@</string>
+	<key>UIDeviceFamily</key>
+	<array>
+		<integer>1</integer>
+		<integer>2</integer>
+	</array>
+	<!-- The renderer is Metal (render_a/src/sys/metal). -->
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>arm64</string>
+		<string>metal</string>
+	</array>
+	<!-- Without a UILaunchScreen key iOS runs the app letterboxed at a legacy
+	     resolution, and the Metal layer would not be the size of the screen. -->
+	<key>UILaunchScreen</key>
+	<dict/>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UIStatusBarHidden</key>
+	<true/>
+	<key>UIViewControllerBasedStatusBarAppearance</key>
+	<true/>
+	<key>UIRequiresFullScreen</key>
+	<true/>
+	<!-- Lets the display run above 60 Hz on ProMotion iPhones. Without it an
+	     app is held to 60 Hz there whatever its display link asks for. (The
+	     display link asks for 60 for now: ios_window.mm.) -->
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
+	<!-- The game files go in Documents (ios_window.mm finds them there, or one
+	     folder down); these two show that folder in the Files app, which is how
+	     the player copies them in and how they find engine.log. -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+</dict>
+</plist>

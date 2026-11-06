@@ -423,7 +423,13 @@ bool CMacSoundSys::Init()
 	AudioComponentDescription desc;
 	memset(&desc, 0, sizeof(desc));
 	desc.componentType         = kAudioUnitType_Output;
+#ifdef LT_IOS
+	// iOS has no "default output" unit; RemoteIO is the speaker / headphones.
+	// Its audio session is set up by the app before this runs (ios_window.mm).
+	desc.componentSubType      = kAudioUnitSubType_RemoteIO;
+#else
 	desc.componentSubType      = kAudioUnitSubType_DefaultOutput;
+#endif
 	desc.componentManufacturer = kAudioUnitManufacturer_Apple;
 
 	AudioComponent comp = AudioComponentFindNext(NULL, &desc);
