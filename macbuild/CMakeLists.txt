@@ -236,6 +236,44 @@ add_subdirectory(${ROOT}/NOLF2/ObjectDLL/TO2 ${CMAKE_BINARY_DIR}/ObjectDLL)  # -
 # that form no single valid token (e.g. `name ## (`) are fine there; with
 # -fms-extensions clang accepts them too once the diagnostic is disabled.
 target_compile_options(NOLF2_ObjectDLL PRIVATE -fms-extensions -Wno-invalid-token-paste -g)
+
+# ★ THE ANIMATION FILE PARSER IS GENERATED. ObjectShared/AnimationLex.cpp and
+# AnimationParse.cpp are one line each -- #include "AnimationLex.o" and
+# "AnimationParse.o" -- the flex and bison output (Monolith's odd .o naming).
+# Those files were never in the repository (the *.o ignore rule hides them), so
+# a fresh clone could not build libObject at all. Generate them here, with the
+# yyanimation prefix the rest of the code calls (AnimationParser.cpp,
+# AnimationLex.h). bison's token numbers follow the %token order, which is what
+# the hand-written AnimationLexSymbols.h the lexer uses expects (258...).
+find_program(LT_FLEX flex REQUIRED)
+find_program(LT_BISON bison REQUIRED)
+set(LT_ANIM_SRC ${ROOT}/NOLF2/ObjectDLL/ObjectShared)
+set(LT_ANIM_GEN ${CMAKE_BINARY_DIR}/generated/animation)
+file(MAKE_DIRECTORY ${LT_ANIM_GEN})
+add_custom_command(
+	OUTPUT ${LT_ANIM_GEN}/AnimationLex.o
+	COMMAND ${LT_FLEX} -Pyyanimation -o${LT_ANIM_GEN}/AnimationLex.o ${LT_ANIM_SRC}/AnimationLex.l
+	DEPENDS ${LT_ANIM_SRC}/AnimationLex.l
+	COMMENT "flex AnimationLex.l"
+	VERBATIM)
+add_custom_command(
+	OUTPUT ${LT_ANIM_GEN}/AnimationParse.o
+	COMMAND ${LT_BISON} -p yyanimation -o ${LT_ANIM_GEN}/AnimationParse.o ${LT_ANIM_SRC}/AnimationParse.y
+	DEPENDS ${LT_ANIM_SRC}/AnimationParse.y
+	COMMENT "bison AnimationParse.y"
+	VERBATIM)
+add_custom_target(NOLF2_AnimationParserGen
+	DEPENDS ${LT_ANIM_GEN}/AnimationLex.o ${LT_ANIM_GEN}/AnimationParse.o)
+add_dependencies(NOLF2_ObjectDLL NOLF2_AnimationParserGen)
+target_include_directories(NOLF2_ObjectDLL PRIVATE ${LT_ANIM_GEN})
+# The generated code's own #include "StdAfx.h" / "AnimationLex.h" were written
+# to resolve beside the .l / .y, in ObjectShared (whose Stdafx.h is not TO2's).
+# -iquote gives exactly these two files that lookup, without reordering the
+# include path of the rest of the module.
+set_source_files_properties(
+	${LT_ANIM_SRC}/AnimationLex.cpp ${LT_ANIM_SRC}/AnimationParse.cpp
+	TARGET_DIRECTORY NOLF2_ObjectDLL
+	PROPERTIES COMPILE_OPTIONS "-iquote;${LT_ANIM_SRC}")
 add_subdirectory(${ROOT}/NOLF2/ClientShellDLL/TO2 ${CMAKE_BINARY_DIR}/ClientShellDLL)  # -> CShell (client game logic)
 target_compile_options(NOLF2_ClientShellDLL PRIVATE -fms-extensions -Wno-invalid-token-paste -g)
 
