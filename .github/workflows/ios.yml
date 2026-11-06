@@ -85,6 +85,12 @@ jobs:
           xcrun --sdk iphoneos --show-sdk-version
 
       - name: Configure (CMake, iPhone SDK)
+        env:
+          # Read when CMake configures (macbuild/CMakeLists.txt writes them into
+          # Info.plist): a new build number (CFBundleVersion) every run, so
+          # sideloading tools can tell builds apart, and the release tag.
+          IOS_BUNDLE_VERSION: ${{ github.run_number }}
+          IOS_RELEASE_TAG: ${{ env.RELEASE_TAG }}
         run: |
           set -e
           cmake -S macbuild -B build-ios -G "Unix Makefiles" \
@@ -95,11 +101,6 @@ jobs:
             -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY
 
       - name: Build NOLF2.app
-        env:
-          # A new build number (CFBundleVersion) every run, so sideloading tools
-          # can tell builds apart.
-          IOS_BUNDLE_VERSION: ${{ github.run_number }}
-          IOS_RELEASE_TAG: ${{ env.RELEASE_TAG }}
         run: |
           set -e
           # -k: keep going after an error, so one run shows every compile error.
