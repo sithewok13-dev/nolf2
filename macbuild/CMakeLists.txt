@@ -506,6 +506,12 @@ if(LT_IOS)
 		set(IOS_BUNDLE_VERSION "1")
 	endif()
 	set(IOS_RELEASE_TAG "$ENV{IOS_RELEASE_TAG}")
+	# The build stamp the app shows ("build 80 · Nov 9"): CI's run number and
+	# UTC date. Left out of local builds, which then show "build dev".
+	set(IOS_BUILD_STAMP_KEYS "")
+	if(NOT "$ENV{IOS_BUILD_NUMBER}" STREQUAL "" AND NOT "$ENV{IOS_BUILD_DATE}" STREQUAL "")
+		set(IOS_BUILD_STAMP_KEYS "<key>SWBuildNumber</key>\n\t<string>$ENV{IOS_BUILD_NUMBER}</string>\n\t<key>SWBuildDate</key>\n\t<string>$ENV{IOS_BUILD_DATE}</string>")
+	endif()
 	execute_process(COMMAND git rev-parse --short HEAD
 		WORKING_DIRECTORY ${ROOT} OUTPUT_VARIABLE IOS_COMMIT
 		OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)

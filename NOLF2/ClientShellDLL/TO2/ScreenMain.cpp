@@ -118,6 +118,7 @@ LTBOOL CScreenMain::Build()
 	}
 
 
+#ifndef LT_IOS
 	// Put the version number at versionpos, but don't let it clip off the edge.
 	pos = g_pLayoutMgr->GetScreenCustomPoint((eScreenID)m_nScreenID,"VersionPos");
 	uint8 nFont = g_pLayoutMgr->GetHelpFont();
@@ -139,6 +140,9 @@ LTBOOL CScreenMain::Build()
 		pos.y = 480 - nUnScaledHeight;
 	}
 	pCtrl->SetBasePos(pos);
+#endif
+	// iOS: no game version line here; the platform layer (ios_window.mm) shows
+	// the build stamp in its place while IOSMainMenu is 1 (OnFocus below).
 
 
 	//Build multiplayer screen to force construction of DM mission file
@@ -197,6 +201,9 @@ void CScreenMain::OnFocus(LTBOOL bFocus)
 		// we get here.
 		g_pInterfaceMgr->SetCommandLineJoin( false );
 	}
+#ifdef LT_IOS
+	WriteConsoleInt("IOSMainMenu", bFocus ? 1 : 0);
+#endif
 
 	CBaseScreen::OnFocus(bFocus);
 }

@@ -75,6 +75,11 @@ jobs:
             exit 1
           fi
 
+      # The build stamp: run number and UTC date, in the app ("build 80 · Nov 9")
+      # and as the first line of the release text ("Build 80 · 2026-11-09").
+      - name: Build date
+        run: echo "BUILD_DATE=$(date -u +%Y-%m-%d)" >> "$GITHUB_ENV"
+
       - name: Select newest Xcode
         run: |
           set -e
@@ -91,6 +96,8 @@ jobs:
           # sideloading tools can tell builds apart, and the release tag.
           IOS_BUNDLE_VERSION: ${{ github.run_number }}
           IOS_RELEASE_TAG: ${{ env.RELEASE_TAG }}
+          IOS_BUILD_NUMBER: ${{ github.run_number }}
+          IOS_BUILD_DATE: ${{ env.BUILD_DATE }}
         run: |
           set -e
           cmake -S macbuild -B build-ios -G "Unix Makefiles" \
@@ -121,7 +128,7 @@ jobs:
           cp -R build-ios/NOLF2.app Payload/
           zip -qry "$IPA_NAME" Payload
           ls -la "$IPA_NAME"
-          plutil -p Payload/NOLF2.app/Info.plist | grep -E 'CFBundleIdentifier|CFBundleDisplayName|CFBundleExecutable|CFBundleVersion|CFBundleShortVersionString|MinimumOSVersion'
+          plutil -p Payload/NOLF2.app/Info.plist | grep -E 'SWBuildNumber|SWBuildDate|CFBundleIdentifier|CFBundleDisplayName|CFBundleExecutable|CFBundleVersion|CFBundleShortVersionString|MinimumOSVersion'
           # What is inside: the engine, Info.plist, three game modules, the
           # signature. Nothing of the game.
           unzip -l "$IPA_NAME"
@@ -146,12 +153,18 @@ jobs:
           prerelease: true
           make_latest: false
           body: |
+            Build ${{ github.run_number }} · ${{ env.BUILD_DATE }}
             Test build of NOLF2 for iOS, rebuilt on every push to the ios branch (run ${{ github.run_number }}, commit ${{ github.sha }}). It may be broken, and it has not been tried on a device yet.
             **NOLF2-ios.ipa** is unsigned: sign and install it with a sideloading tool such as SideStore or AltStore.
             You need your own copy of No One Lives Forever 2; no game files are included. Open the app once, then copy your game files (GAME.rez, GAME2.rez and the rest of the game folder) into Files > On My iPhone > NOLF2, and open the app again.
             If something goes wrong, the file engine.log in that same folder says what happened.
           files: ${{ env.IPA_NAME }}
           fail_on_unmatched_files: true
+
+      - name: Release text with the build line
+        if: ${{ env.RELEASE_TAG != '' }}
+        run: |
+          { echo "Build ${{ github.run_number }} · ${BUILD_DATE}"; echo; cat macbuild/ios/RELEASE_NOTES.md; } > release-body.md
 
       - name: Publish release for the tag
         if: ${{ env.RELEASE_TAG != '' }}
@@ -160,7 +173,7 @@ jobs:
           tag_name: ${{ env.RELEASE_TAG }}
           target_commitish: ${{ github.sha }}
           name: NOLF2 for iOS ${{ env.RELEASE_TAG }}
-          body_path: macbuild/ios/RELEASE_NOTES.md
+          body_path: release-body.md
           prerelease: ${{ contains(env.RELEASE_TAG, '-') }}
           make_latest: ${{ !contains(env.RELEASE_TAG, '-') }}
           files: ${{ env.IPA_NAME }}

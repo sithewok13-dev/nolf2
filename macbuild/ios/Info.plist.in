@@ -24,6 +24,7 @@
 	<string>@IOS_RELEASE_TAG@</string>
 	<key>NOLF2Commit</key>
 	<string>@IOS_COMMIT@</string>
+	@IOS_BUILD_STAMP_KEYS@
 	<key>CFBundleSupportedPlatforms</key>
 	<array>
 		<string>iPhoneOS</string>

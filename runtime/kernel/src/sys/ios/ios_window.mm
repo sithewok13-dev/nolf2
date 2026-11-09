@@ -257,6 +257,7 @@ static std::vector<std::string> ios_BuildArgs(NSString* pGameDir) {
 @property (nonatomic, copy)   NSString* gameDir;
 @property (nonatomic) BOOL started;
 @property (nonatomic, strong) UILabel* toast;
+@property (nonatomic, strong) UILabel* buildStamp;
 - (void)showMessage:(NSString*)text;
 - (void)startEngine;
 @end
@@ -379,6 +380,50 @@ static std::vector<std::string> ios_BuildArgs(NSString* pGameDir) {
     [h impactOccurred];
 }
 
+// "build 80 · Nov 9" from the run number and UTC date CI writes into
+// Info.plist (SWBuildNumber, SWBuildDate); "build dev" for a local build.
+static NSString* LTIOS_BuildStampText(void) {
+    NSDictionary* info = [[NSBundle mainBundle] infoDictionary];
+    NSString* num = info[@"SWBuildNumber"];
+    if (![num isKindOfClass:[NSString class]] || num.length == 0) return @"build dev";
+    NSString* day = info[@"SWBuildDate"];
+    NSDateFormatter* f = [[NSDateFormatter alloc] init];
+    f.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+    f.timeZone = [NSTimeZone timeZoneWithName:@"UTC"];
+    f.dateFormat = @"yyyy-MM-dd";
+    NSDate* d = [day isKindOfClass:[NSString class]] ? [f dateFromString:day] : nil;
+    if (!d) return [NSString stringWithFormat:@"build %@", num];
+    f.dateFormat = @"MMM d";
+    return [NSString stringWithFormat:@"build %@ \u00B7 %@", num, [f stringFromDate:d]];
+}
+
+// The build stamp: small, dim, bottom right, clear of the notch and home bar,
+// only while the game's main menu is up (IOSMainMenu, set by CScreenMain).
+- (void)checkBuildStamp {
+    BOOL show = LTMacClient_GetConsoleInt("IOSMainMenu", 0) != 0;
+    if (!show) {
+        self.buildStamp.hidden = YES;
+        return;
+    }
+    if (!self.buildStamp) {
+        UILabel* l = [[UILabel alloc] init];
+        l.text = LTIOS_BuildStampText();
+        l.font = [UIFont systemFontOfSize:12];
+        l.textColor = [UIColor colorWithWhite:1 alpha:0.5];
+        l.userInteractionEnabled = NO;
+        [l sizeToFit];
+        [self.view addSubview:l];
+        self.buildStamp = l;
+    }
+    UILabel* l = self.buildStamp;
+    UIEdgeInsets in = self.view.safeAreaInsets;
+    CGSize sz = l.bounds.size;
+    l.frame = CGRectMake(self.view.bounds.size.width - MAX(in.right, 16) - 8 - sz.width,
+                         self.view.bounds.size.height - MAX(in.bottom, 12) - 4 - sz.height,
+                         sz.width, sz.height);
+    l.hidden = NO;
+}
+
 - (void)showToast:(NSString*)text {
     if (!self.toast) {
         UILabel* l = [[UILabel alloc] init];
@@ -442,6 +487,7 @@ static std::vector<std::string> ios_BuildArgs(NSString* pGameDir) {
         if (bRunning) {
             [self logFrameStats:fStart stepMs:(CACurrentMediaTime() - fStart) * 1000.0];
             [self checkMaxFps];
+            [self checkBuildStamp];
         }
         if (!bRunning) {
             [link invalidate];
