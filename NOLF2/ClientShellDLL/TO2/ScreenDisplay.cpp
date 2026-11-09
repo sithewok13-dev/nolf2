@@ -33,6 +33,15 @@ namespace
 	LTBOOL bInitTex;
 	LTBOOL bInitLM;
 
+#ifdef LT_IOS
+	// iOS: the Frame Rate row. The game only sets the console variable
+	// IOSMaxFPS (60 or 120); the platform layer (ios_window.mm) asks the screen
+	// for that rate, remembers it and says so. The help id is not a string
+	// resource: GetHelpString below answers it.
+	const uint32 kIOSFrameRateHelp = 0x10F0F;
+	char szIOSFrameRate[] = "Frame Rate";
+#endif
+
 	const int	kNumSteps = 50;
 	const float	kBreakpoint = (float)(kNumSteps/3);
 	const float	kUpperSteps = (float)kNumSteps - kBreakpoint;
@@ -138,6 +147,10 @@ CScreenDisplay::CScreenDisplay()
 
     m_pResolutionCtrl   = LTNULL;
 	m_pHardwareCursor	= LTNULL;
+#ifdef LT_IOS
+	m_pIOSFrameRate		= LTNULL;
+	m_nIOSFrameRate		= 0;
+#endif
 }
 
 CScreenDisplay::~CScreenDisplay()
@@ -180,7 +193,15 @@ LTBOOL CScreenDisplay::Build()
 
 	m_pHardwareCursor = AddToggle(IDS_HARDWARE_CURSOR,IDS_HELP_HARDWARE_CURSOR,kGap,&m_bHardwareCursor);
 
+#ifdef LT_IOS
+	// On iOS the screen's refresh paces every frame, so VSync means nothing
+	// there; its row becomes the frame rate: 60 (default) or 120 on ProMotion.
+	m_pIOSFrameRate = AddCycle(szIOSFrameRate,kIOSFrameRateHelp,kGap,&m_nIOSFrameRate);
+	m_pIOSFrameRate->AddString("60 FPS");
+	m_pIOSFrameRate->AddString("120 FPS");
+#else
 	AddToggle(IDS_VSYNC,IDS_HELP_VSYNC,kGap,&m_bVSync);
+#endif
 
 
 	m_pGamma = AddSlider(IDS_GAMMA,IDS_HELP_GAMMA,kGap,kWidth,-1,&m_nGamma);
@@ -430,6 +451,9 @@ void CScreenDisplay::OnFocus(LTBOOL bFocus)
 
 		m_bHardwareCursor = pProfile->m_bHardwareCursor;
 		m_bVSync = pProfile->m_bVSync;
+#ifdef LT_IOS
+		m_nIOSFrameRate = (GetConsoleInt("IOSMaxFPS",60) >= 120) ? 1 : 0;
+#endif
 
 
 		float gamma = pProfile->m_fGamma;
@@ -582,7 +606,13 @@ LTBOOL CScreenDisplay::OnLButtonUp(int x, int y)
 			return LTTRUE;
 		}
 	}
+#ifdef LT_IOS
+	LTBOOL bHandled = CBaseScreen::OnLButtonUp(x, y);
+	ApplyIOSFrameRate();
+	return bHandled;
+#else
 	return CBaseScreen::OnLButtonUp(x, y);
+#endif
 }
 
 LTBOOL CScreenDisplay::OnRButtonUp(int x, int y)
@@ -606,7 +636,13 @@ LTBOOL CScreenDisplay::OnRButtonUp(int x, int y)
 			return LTTRUE;
 		}
 	}
+#ifdef LT_IOS
+	LTBOOL bHandled = CBaseScreen::OnRButtonUp(x, y);
+	ApplyIOSFrameRate();
+	return bHandled;
+#else
 	return CBaseScreen::OnRButtonUp(x, y);
+#endif
 }
 
 
@@ -639,6 +675,9 @@ LTBOOL CScreenDisplay::OnLeft()
 		WriteConsoleFloat("GammaG",fGamma);
 		WriteConsoleFloat("GammaB",fGamma);
 	}
+#ifdef LT_IOS
+	ApplyIOSFrameRate();
+#endif
 
 	return LTTRUE;
 }
@@ -671,12 +710,46 @@ LTBOOL CScreenDisplay::OnRight()
 		WriteConsoleFloat("GammaG",fGamma);
 		WriteConsoleFloat("GammaB",fGamma);
 	}
+#ifdef LT_IOS
+	ApplyIOSFrameRate();
+#endif
 	return LTTRUE;
 }
 LTBOOL CScreenDisplay::OnEnter()
 {
+#ifdef LT_IOS
+	LTBOOL bHandled = CBaseScreen::OnEnter();
+	ApplyIOSFrameRate();
+	return bHandled;
+#else
 	return CBaseScreen::OnEnter();
+#endif
 }
+
+#ifdef LT_IOS
+// The row's value goes to IOSMaxFPS as soon as it changes, so the new rate
+// is seen (and felt) at once, not only when the screen is left.
+void CScreenDisplay::ApplyIOSFrameRate()
+{
+	if (!m_pIOSFrameRate)
+		return;
+	m_pIOSFrameRate->UpdateData(LTTRUE);
+	int nWant = m_nIOSFrameRate ? 120 : 60;
+	if (GetConsoleInt("IOSMaxFPS",60) != nWant)
+		WriteConsoleInt("IOSMaxFPS",nWant);
+}
+
+void CScreenDisplay::GetHelpString(uint32 dwHelpId, uint16 nControlIndex, char *buffer, int bufLen)
+{
+	if (dwHelpId == kIOSFrameRateHelp)
+	{
+		strncpy(buffer,"120 FPS: smoother, uses more battery. 60 FPS: cooler, uses less battery.",bufLen-1);
+		buffer[bufLen-1] = 0;
+		return;
+	}
+	CBaseScreen::GetHelpString(dwHelpId,nControlIndex,buffer,bufLen);
+}
+#endif
 
 
 void CScreenDisplay::ConfirmHardwareCursor(LTBOOL bReturn)

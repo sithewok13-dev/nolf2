@@ -38,6 +38,17 @@
 //             menu and backs out of menu screens. The full touch controls come
 //             later; this is the minimum to reach and drive the menus.
 //
+//           * Frame rate: 60 (default) or 120 on a ProMotion screen, chosen
+//             with the Frame Rate row of the game's Display screen (Options >
+//             Display, where VSync is on the PC). The game writes the console
+//             variable IOSMaxFPS; this file asks the display link for that
+//             rate, remembers it (NSUserDefaults) and says so with a toast and
+//             a haptic. The engine is variable-step (each frame's real time,
+//             exact physics integration, the local server stepped and every
+//             object sent each frame), so 120 draws new frames and keeps the
+//             game's speed. Release builds have no engine frame cap (MaxFPS
+//             is compiled out with _FINAL): the display link is the only pace.
+//
 // ----------------------------------------------------------------------- //
 
 #import <UIKit/UIKit.h>
@@ -58,6 +69,8 @@
 extern "C" bool LTMacClient_Start(int argc, char** argv);
 extern "C" bool LTMacClient_Step(void);
 extern "C" void LTMacClient_Stop(void);
+extern "C" int  LTMacClient_GetConsoleInt(const char* pName, int nDefault);
+extern "C" void LTMacClient_RunConsole(const char* pCommand);
 
 // --------------------------------------------------------------------------
 // State
@@ -77,6 +90,10 @@ namespace {
     enum EIOSInput { IN_MOVE, IN_DOWN, IN_UP, IN_LOOK, IN_ESCAPE };
     struct SIOSInput { EIOSInput m_eType; float m_fX, m_fY; };
     std::vector<SIOSInput> g_aInput;
+
+    // The frame rate asked of the screen: 60 or 120 (IOSMaxFPS).
+    NSString* const kMaxFpsKey = @"IOSMaxFps";
+    int g_nMaxFps = 60;
 
     // The scale from view points to drawable pixels (the engine works in
     // drawable pixels everywhere, see LTMacWin_GetSize).
@@ -239,6 +256,7 @@ static std::vector<std::string> ios_BuildArgs(NSString* pGameDir) {
 @property (nonatomic, strong) UILabel* message;
 @property (nonatomic, copy)   NSString* gameDir;
 @property (nonatomic) BOOL started;
+@property (nonatomic, strong) UILabel* toast;
 - (void)showMessage:(NSString*)text;
 - (void)startEngine;
 @end
@@ -322,16 +340,110 @@ static std::vector<std::string> ios_BuildArgs(NSString* pGameDir) {
         return;
     }
 
+    // The remembered frame rate, given to the game so its Display screen shows it.
+    NSInteger nSaved = [[NSUserDefaults standardUserDefaults] integerForKey:kMaxFpsKey];
+    g_nMaxFps = (nSaved == 120) ? 120 : 60;
+    char szCmd[64];
+    snprintf(szCmd, sizeof(szCmd), "+IOSMaxFPS %d", g_nMaxFps);
+    LTMacClient_RunConsole(szCmd);
+
     self.displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(frame:)];
-    // 60 Hz for now, also on 120 Hz screens: what this engine costs per frame
-    // on a phone is not known yet.
-    self.displayLink.preferredFrameRateRange = CAFrameRateRangeMake(30, 60, 60);
+    [self applyMaxFps];
     [self.displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+    fprintf(stderr, "[ios] frame rate %d (screen max %ld)\n", g_nMaxFps,
+            (long)[UIScreen mainScreen].maximumFramesPerSecond);
+}
+
+// Ask the screen for 60 or 120 frames a second. 120 only runs on a ProMotion
+// screen; elsewhere iOS gives the most the screen has.
+- (void)applyMaxFps {
+    if (!self.displayLink) return;
+    if (g_nMaxFps == 120)
+        self.displayLink.preferredFrameRateRange = CAFrameRateRangeMake(80, 120, 120);
+    else
+        self.displayLink.preferredFrameRateRange = CAFrameRateRangeMake(60, 60, 60);
+}
+
+// The game's Display screen changed IOSMaxFPS: follow it, remember it, say so.
+- (void)checkMaxFps {
+    int n = LTMacClient_GetConsoleInt("IOSMaxFPS", g_nMaxFps);
+    if ((n != 60 && n != 120) || n == g_nMaxFps) return;
+    g_nMaxFps = n;
+    [[NSUserDefaults standardUserDefaults] setInteger:n forKey:kMaxFpsKey];
+    [self applyMaxFps];
+    fprintf(stderr, "[ios] frame rate now %d\n", n);
+    [self showToast:(n == 120) ? @"120 FPS: smoother, uses more battery"
+                               : @"60 FPS: cooler, uses less battery"];
+    UIImpactFeedbackGenerator* h = [[UIImpactFeedbackGenerator alloc]
+                                    initWithStyle:UIImpactFeedbackStyleMedium];
+    [h impactOccurred];
+}
+
+- (void)showToast:(NSString*)text {
+    if (!self.toast) {
+        UILabel* l = [[UILabel alloc] init];
+        l.textAlignment = NSTextAlignmentCenter;
+        l.textColor = [UIColor whiteColor];
+        l.backgroundColor = [UIColor colorWithWhite:0 alpha:0.75];
+        l.font = [UIFont boldSystemFontOfSize:15];
+        l.layer.cornerRadius = 10;
+        l.layer.masksToBounds = YES;
+        l.userInteractionEnabled = NO;
+        [self.view addSubview:l];
+        self.toast = l;
+    }
+    UILabel* l = self.toast;
+    l.text = text;
+    CGSize sz = [l sizeThatFits:CGSizeMake(self.view.bounds.size.width - 80, 40)];
+    CGFloat w = sz.width + 32, hgt = sz.height + 16;
+    UIEdgeInsets in = self.view.safeAreaInsets;
+    l.frame = CGRectMake((self.view.bounds.size.width - w) / 2, MAX(in.top, 16) + 8, w, hgt);
+    [l.layer removeAllAnimations];
+    l.alpha = 1;
+    [UIView animateWithDuration:0.4 delay:1.8 options:UIViewAnimationOptionBeginFromCurrentState
+                     animations:^{ l.alpha = 0; } completion:nil];
+}
+
+// One line in engine.log every 5 s of play (not in menus): the frame rate
+// reached, the frame-to-frame time (average, worst), how many frames came
+// late (over 1.5 refreshes), and the engine's own time per frame.
+- (void)logFrameStats:(double)fStart stepMs:(double)fStepMs {
+    static double s_fPrev = 0, s_fT0 = 0, s_fSum = 0, s_fMax = 0, s_fStep = 0, s_fStepMax = 0;
+    static unsigned s_nFrames = 0, s_nLate = 0;
+    if (!LTMacWin_EngineWantsCursorLock()) { s_fPrev = 0; s_fT0 = 0; return; }
+    if (s_fPrev == 0 || fStart - s_fPrev > 0.5) {   // first frame, or back from a pause
+        s_fPrev = s_fT0 = fStart;
+        s_fSum = s_fMax = s_fStep = s_fStepMax = 0;
+        s_nFrames = s_nLate = 0;
+        return;
+    }
+    double fMs = (fStart - s_fPrev) * 1000.0;
+    s_fPrev = fStart;
+    s_fSum += fMs;   if (fMs > s_fMax) s_fMax = fMs;
+    s_fStep += fStepMs; if (fStepMs > s_fStepMax) s_fStepMax = fStepMs;
+    if (fMs > 1.5 * 1000.0 / g_nMaxFps) ++s_nLate;
+    ++s_nFrames;
+    if (fStart - s_fT0 >= 5.0) {
+        fprintf(stderr, "[ios] play %d: %.1f fps | frame avg %.2f max %.2f ms | late %u/%u"
+                        " | engine avg %.2f max %.2f ms\n",
+                g_nMaxFps, s_nFrames * 1000.0 / s_fSum, s_fSum / s_nFrames, s_fMax,
+                s_nLate, s_nFrames, s_fStep / s_nFrames, s_fStepMax);
+        fflush(stderr);
+        s_fT0 = fStart;
+        s_fSum = s_fMax = s_fStep = s_fStepMax = 0;
+        s_nFrames = s_nLate = 0;
+    }
 }
 
 - (void)frame:(CADisplayLink*)link {
     @autoreleasepool {
-        if (!LTMacClient_Step()) {
+        double fStart = CACurrentMediaTime();
+        bool bRunning = LTMacClient_Step();
+        if (bRunning) {
+            [self logFrameStats:fStart stepMs:(CACurrentMediaTime() - fStart) * 1000.0];
+            [self checkMaxFps];
+        }
+        if (!bRunning) {
             [link invalidate];
             self.displayLink = nil;
             LTMacClient_Stop();

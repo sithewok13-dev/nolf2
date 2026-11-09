@@ -61,6 +61,11 @@ public:
 	void	ConfirmHardwareCursor(LTBOOL bReturn);
 
 protected:
+#ifdef LT_IOS
+	// iOS: the Frame Rate row (60 / 120) and its help line.
+	void	GetHelpString(uint32 dwHelpId, uint16 nControlIndex, char *buffer, int bufLen);
+	void	ApplyIOSFrameRate();
+#endif
     uint32  OnCommand(uint32 dwCommand, uintptr_t dwParam1, uintptr_t dwParam2);
 
 	// Build the array of resolutions
@@ -95,6 +100,11 @@ private:
 
 	CLTGUISlider					*m_pGamma;
 	CLTGUICycleCtrl					*m_pHardwareCursor;
+
+#ifdef LT_IOS
+	CLTGUICycleCtrl					*m_pIOSFrameRate;
+	uint8							m_nIOSFrameRate;	// 0 = 60, 1 = 120
+#endif
 
 
 

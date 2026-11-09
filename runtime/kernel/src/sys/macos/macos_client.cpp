@@ -197,6 +197,20 @@ extern "C" bool LTMacClient_Start(int argc, char** argv)
 }
 
 // One frame. False once the engine wants to stop (Quit, or a failed update).
+// A console variable's value as an int (nDefault if it doesn't exist), and a
+// console command run from the platform layer. The iOS shell uses them for the
+// frame-rate setting (IOSMaxFPS), which the game's Display screen writes.
+extern "C" int LTMacClient_GetConsoleInt(const char* pName, int nDefault)
+{
+    LTCommandVar* pVar = cc_FindConsoleVar(&g_ClientConsoleState, pName);
+    return pVar ? (int)pVar->floatVal : nDefault;
+}
+
+extern "C" void LTMacClient_RunConsole(const char* pCommand)
+{
+    c_CommandHandler(pCommand);
+}
+
 extern "C" bool LTMacClient_Step(void)
 {
     if (!LTMacClient_FrameTick())
