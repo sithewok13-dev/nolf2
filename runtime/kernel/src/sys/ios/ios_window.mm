@@ -61,6 +61,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <vector>
@@ -233,19 +234,52 @@ static NSString* ios_FindGameFolder(NSString* pDocs) {
     return nil;
 }
 
-// argv for the engine: the program name, then a -rez pair per archive, in the
-// macOS launcher's order -- the retail archives, then the loose Game folder,
-// which overrides them (launcher/NOLF2Launcher.swift, GameFolder.archives).
+// argv for the engine: the program name, then a -rez pair per archive. Every
+// .rez in the game folder is loaded (later ones override earlier ones):
+//   1. the retail archives, in the order the original game's own dedicated
+//      server lists them (NOLF2/ServerApp/ServerDlg.cpp): GAME, GAME2,
+//      GAMEDLL, SOUND, GAMEL, GAMEP, GAMEP2. Copies differ in which of these
+//      they have -- one had GAME, GAME2, GAMEDLL and SOUND, with the interface
+//      text (cres.dll) not in GAME or GAME2 -- so loading only GAME and GAME2,
+//      as the macOS launcher does, is not enough;
+//   2. any other .rez, in name order (the player's extras);
+//   3. the 1.3 patch, Update_v1x3.rez, so it overrides the retail files;
+//   4. the loose Game folder, which overrides everything (as on macOS).
+// ENGINE.REZ is left out: the engine always adds engine.rez itself, last
+// (macos_client.cpp), and the file-name layer finds it whatever its case.
 static std::vector<std::string> ios_BuildArgs(NSString* pGameDir) {
     std::vector<std::string> args;
     args.push_back("Lithtech");
-    const char* aBase[] = { "GAME.rez", "GAME2.rez", "Update_v1x3.rez" };
-    for (const char* a : aBase) {
-        std::string s = ios_FindNoCase(pGameDir, a);
-        if (!s.empty()) { args.push_back("-rez"); args.push_back(s); }
+    std::vector<std::string> used;
+    auto add = [&](const std::string& s) {
+        if (s.empty()) return;
+        for (const std::string& u : used)
+            if (strcasecmp(u.c_str(), s.c_str()) == 0) return;
+        used.push_back(s);
+        args.push_back("-rez");
+        args.push_back(s);
+    };
+
+    const char* aRetail[] = { "GAME.rez", "GAME2.rez", "GAMEDLL.rez", "SOUND.rez",
+                              "GAMEL.rez", "GAMEP.rez", "GAMEP2.rez" };
+    for (const char* a : aRetail)
+        add(ios_FindNoCase(pGameDir, a));
+
+    NSArray<NSString*>* items = [[[NSFileManager defaultManager] contentsOfDirectoryAtPath:pGameDir error:nil]
+                                  sortedArrayUsingSelector:@selector(caseInsensitiveCompare:)];
+    for (NSString* sName in items) {
+        BOOL bDir = NO;
+        NSString* sPath = [pGameDir stringByAppendingPathComponent:sName];
+        if ([sName caseInsensitiveCompare:@"engine.rez"] == NSOrderedSame ||        // the engine adds it
+            [sName caseInsensitiveCompare:@"Update_v1x3.rez"] == NSOrderedSame)     // added next
+            continue;
+        if ([[sName pathExtension] caseInsensitiveCompare:@"rez"] == NSOrderedSame &&
+            [[NSFileManager defaultManager] fileExistsAtPath:sPath isDirectory:&bDir] && !bDir)
+            add(std::string([sName UTF8String]));
     }
-    std::string sGame = ios_FindNoCase(pGameDir, "Game");
-    if (!sGame.empty()) { args.push_back("-rez"); args.push_back(sGame); }
+
+    add(ios_FindNoCase(pGameDir, "Update_v1x3.rez"));
+    add(ios_FindNoCase(pGameDir, "Game"));
     return args;
 }
 
