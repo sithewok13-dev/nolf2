@@ -220,6 +220,14 @@ int   ltios_mkdir(const char *pPath, mode_t nMode);
 void  ltios_ResolvePath(const char *pPath, char *pOut, size_t nOut);
 #ifdef __cplusplus
 }
+// Apple's C++ library calls std::fopen inside <fstream> (so its file streams
+// get the same treatment); the redirect makes that std::ltios_fopen.
+namespace std {
+using ::ltios_fopen;
+using ::ltios_stat;
+using ::ltios_opendir;
+using ::ltios_mkdir;
+}
 #endif
 #define fopen(...)   ltios_fopen(__VA_ARGS__)
 #define stat(...)    ltios_stat(__VA_ARGS__)
