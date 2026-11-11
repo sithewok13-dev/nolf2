@@ -31,6 +31,7 @@ extern CGameClientShell* g_pGameClientShell;
 #include <Direct.h>			// For _rmdir
 #include "dinput.h"
 #include <set>
+#include <vector>
 #include <IO.H>
 
 VarTrack	g_vtMouseMinSensitivity;
@@ -293,6 +294,50 @@ static bool CreatePlayerGuid( char* pszPlayerGuid, int nSize )
 	return true;
 }
 
+#if defined(LT_MACOS)
+// Added (macOS / iOS port): where a new profile's defaults come from.
+//
+// Profiles\default.prf is a loose file of a Windows install (the installer
+// puts it next to the .rez archives), not part of any archive. A copy made by
+// taking just the archives -- the first iPhone copy was exactly that -- has no
+// such file, and then CUserProfile::Init could not make any profile and the
+// game stopped before its menu. So, in turn:
+//   1. the file in the game folder, as before;
+//   2. the same name inside the .rez archives, in case a copy keeps it there;
+//   3. an empty profile: the game starts, every setting at the code's own
+//      default, but with NO key or mouse bindings (those come only from
+//      default.prf). The log says so.
+static bool ProfileMgr_ParseDefaultPrf(CButeMgr& buteMgr, const std::string& dfn)
+{
+	if (buteMgr.Parse(dfn.c_str()))
+		return true;
+
+	buteMgr.Term();
+	ILTStream* pStream = LTNULL;
+	if (g_pLTClient->OpenFile(dfn.c_str(), &pStream) == LT_OK && pStream)
+	{
+		uint32 nLen = 0;
+		pStream->GetLen(&nLen);
+		std::vector<char> aData(nLen + 1, 0);
+		bool bOK = nLen > 0 && pStream->Read(&aData[0], nLen) == LT_OK &&
+		           buteMgr.Parse(&aData[0], nLen, 0, dfn.c_str());
+		pStream->Release();
+		if (bOK)
+		{
+			fprintf(stderr, "[profile] %s read from the .rez archives\n", dfn.c_str());
+			return true;
+		}
+		buteMgr.Term();
+	}
+
+	fprintf(stderr, "[profile] %s not found (not in the game folder, not in the .rez archives):"
+	                " starting from an EMPTY profile -- default settings, no key bindings\n",
+	        dfn.c_str());
+	static char s_szEmpty[] = "\n";
+	return buteMgr.Parse(s_szEmpty, 1, 0, dfn.c_str());
+}
+#endif
+
 LTBOOL CUserProfile::Init(const std::string& profileName, LTBOOL bCreate)
 {
 	std::string fn = GetProfileFile( profileName.c_str( ));
@@ -340,8 +385,11 @@ LTBOOL CUserProfile::Init(const std::string& profileName, LTBOOL bCreate)
 		}
 		else
 		{
-			
+#if defined(LT_MACOS)
+			bRet = ProfileMgr_ParseDefaultPrf(m_buteMgr, dfn);
+#else
 			bRet = m_buteMgr.Parse(dfn.c_str());
+#endif
 		}
 
 		if (!bRet) 
@@ -1801,7 +1849,11 @@ LTBOOL CUserProfile::RestoreDefaults(uint8 nFlags)
 	}
 	else
 	{
+#if defined(LT_MACOS)
+		bRet = ProfileMgr_ParseDefaultPrf(m_buteMgr, dfn);
+#else
 		bRet = m_buteMgr.Parse(dfn.c_str());
+#endif
 	}
 
 	if (!bRet) return LTFALSE;
