@@ -62,6 +62,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <vector>
 #include <string>
 
@@ -336,8 +337,17 @@ static std::vector<std::string> ios_BuildArgs(NSString* pGameDir) {
 
     if (!LTMacClient_Start((int)args.size(), argv.data())) {
         fprintf(stderr, "[ios] the engine did not start\n");
+        // The one cause we can name for the player: a new profile is made from
+        // Profiles\default.prf, a loose file of the game folder (not in a .rez).
+        // Without it, and with no profile saved yet, CProfileMgr::Init fails.
+        struct stat st;
+        bool bHaveDefaultProfile = (stat("Profiles/default.prf", &st) == 0);   // ignores case (ios_paths.cpp)
+        fprintf(stderr, "[ios] Profiles/default.prf %s\n", bHaveDefaultProfile ? "found" : "NOT found");
         fflush(stderr);
-        [self showMessage:@"The game could not start.\n\nThe file engine.log in the app's folder in the Files app says why. Please send it with a bug report."];
+        if (!bHaveDefaultProfile)
+            [self showMessage:@"The game could not start: the Profiles folder from your game folder is missing (it holds the file default.prf).\n\nCopy the Profiles folder into the app's folder in the Files app, next to GAME.REZ, then open the app again."];
+        else
+            [self showMessage:@"The game could not start.\n\nThe file engine.log in the app's folder in the Files app says why. Please send it with a bug report."];
         return;
     }
 
@@ -567,6 +577,10 @@ static NSString* LTIOS_BuildStampText(void) {
     }
 
     fprintf(stderr, "[ios] game folder: %s\n", [gameDir fileSystemRepresentation]);
+    // What is in it (names only), so a bug report shows what the player copied.
+    for (NSString* sName in [[[NSFileManager defaultManager] contentsOfDirectoryAtPath:gameDir error:nil]
+                               sortedArrayUsingSelector:@selector(caseInsensitiveCompare:)])
+        fprintf(stderr, "[ios]   %s\n", [sName UTF8String]);
     chdir([gameDir fileSystemRepresentation]);
 
     // The real client shell and the three game modules, from the app bundle

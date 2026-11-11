@@ -30,6 +30,8 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <string>
+#include <utility>
 #include <vector>
 
 static ILTClient *ilt_client_cres;
@@ -280,6 +282,28 @@ int cres_LoadStringImpl(LTMacResModule *pSelf, unsigned int nID, char *pBuf, int
 LTMacResModule *g_pCResModule = 0;
 bool            g_bCResTried  = false;
 
+// No usable cres.dll: the built-in English text instead (macos_cres.h).
+LTMacResModule *cres_UseBuiltin()
+{
+	if (g_nLTBuiltinCRes == 0)
+		return 0;
+
+	CMacCResData *pData = new CMacCResData;
+	pData->m_aStrings.reserve(g_nLTBuiltinCRes);
+	for (unsigned int i = 0; i < g_nLTBuiltinCRes; ++i)
+		pData->m_aStrings.push_back(std::make_pair((uint32)g_aLTBuiltinCRes[i].m_nID,
+		                                           std::string(g_aLTBuiltinCRes[i].m_pText)));
+
+	g_pCResModule = new LTMacResModule;
+	g_pCResModule->m_nMagic        = LTMACRESMODULE_MAGIC;
+	g_pCResModule->m_pfnLoadString = cres_LoadStringImpl;
+	g_pCResModule->m_pImpl         = pData;
+
+	fprintf(stderr, "[cres] using the built-in English text instead (%u strings)\n",
+	        g_nLTBuiltinCRes);
+	return g_pCResModule;
+}
+
 } // anonymous namespace
 
 LTMacResModule *LTMacCRes_GetDefault()
@@ -296,8 +320,8 @@ LTMacResModule *LTMacCRes_GetDefault()
 	ILTStream *pStream = 0;
 	if (ilt_client_cres->OpenFile("cres.dll", &pStream) != LT_OK || !pStream)
 	{
-		fprintf(stderr, "[cres] cres.dll not found — game UI strings will be empty\n");
-		return 0;
+		fprintf(stderr, "[cres] cres.dll not found in the game files\n");
+		return cres_UseBuiltin();
 	}
 
 	uint32 nLen = 0;
@@ -309,7 +333,7 @@ LTMacResModule *LTMacCRes_GetDefault()
 	if (nRead != LT_OK)
 	{
 		fprintf(stderr, "[cres] couldn't read cres.dll (%u bytes)\n", nLen);
-		return 0;
+		return cres_UseBuiltin();
 	}
 
 	CMacCResData *pParsed = new CMacCResData;
@@ -317,7 +341,7 @@ LTMacResModule *LTMacCRes_GetDefault()
 	{
 		fprintf(stderr, "[cres] cres.dll has no parsable string resources\n");
 		delete pParsed;
-		return 0;
+		return cres_UseBuiltin();
 	}
 
 	g_pCResModule = new LTMacResModule;

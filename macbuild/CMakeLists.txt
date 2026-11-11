@@ -167,6 +167,33 @@ target_sources(EXE_Lithtech PRIVATE
     ${ROOT}/runtime/render_a/src/sys/shared/render_dxt.cpp        # CPU DXT1/3/5 -> BGRA8 (GPUs without BC: iPhones)
     ${ROOT}/runtime/sound/src/sys/macos/s_coreaudio.cpp       # Phase-3 CoreAudio ILTSoundSys (registers the sound factory)
     ${ROOT}/runtime/render_b/src/sys/d3d/d3dtexinterface.cpp) # ILTTexInterface (renderer-agnostic; console font/UI textures)
+# The built-in English interface text, the fallback when the player's game files
+# have no cres.dll (macos_cres.h): generated from the cres.dll sources in this
+# repository, NOLF2/ClientRes, at build time.
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+set(LT_CRES_SRC ${ROOT}/NOLF2/ClientRes)
+set(LT_CRES_INPUTS
+	${LT_CRES_SRC}/Shared/ClientResShared.h ${LT_CRES_SRC}/TO2/ClientRes.h
+	--
+	${LT_CRES_SRC}/TO2/Lang/EN/ClientRes.rc ${LT_CRES_SRC}/Shared/Lang/EN/ClientResShared.rc)
+set(LT_CRES_OUT ${CMAKE_BINARY_DIR}/generated/cres_builtin_en.cpp)
+add_custom_command(
+	OUTPUT ${LT_CRES_OUT}
+	COMMAND Python3::Interpreter -I ${CMAKE_CURRENT_SOURCE_DIR}/tools/rc_strings.py
+	        ${LT_CRES_OUT} ${LT_CRES_INPUTS}
+	DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tools/rc_strings.py
+	        ${LT_CRES_SRC}/Shared/ClientResShared.h ${LT_CRES_SRC}/TO2/ClientRes.h
+	        ${LT_CRES_SRC}/TO2/Lang/EN/ClientRes.rc ${LT_CRES_SRC}/Shared/Lang/EN/ClientResShared.rc
+	COMMENT "Built-in English interface text (cres.dll sources)"
+	VERBATIM)
+# EXE_Lithtech lives in runtime/client's directory scope, so the file has to be
+# marked GENERATED there too, and built by a target of its own before it.
+add_custom_target(LT_CResBuiltinGen DEPENDS ${LT_CRES_OUT})
+set_source_files_properties(${LT_CRES_OUT} TARGET_DIRECTORY EXE_Lithtech
+	PROPERTIES GENERATED TRUE)
+target_sources(EXE_Lithtech PRIVATE ${LT_CRES_OUT})
+add_dependencies(EXE_Lithtech LT_CResBuiltinGen)
+
 # ⚠️⚠️ TARGET_DIRECTORY IS LOAD-BEARING, NOT DECORATION. Source-file properties
 # are DIRECTORY-scoped, and EXE_Lithtech is defined in runtime/client's scope --
 # so this same call without it set the property in a directory nobody compiles
@@ -489,6 +516,15 @@ endif()
 # signs it for real. No game files go in the bundle, ever.
 # ---------------------------------------------------------------------------
 if(LT_IOS)
+	# File names that ignore case (msvc_crt_compat.h routes fopen / stat /
+	# opendir / mkdir to it). Every image needs its own copy: the game modules
+	# are closed worlds that import nothing from the engine (see above).
+	foreach(_t EXE_Lithtech NOLF2_ObjectDLL NOLF2_ClientShellDLL NOLF2_ClientFXDLL)
+		target_sources(${_t} PRIVATE ${ROOT}/runtime/kernel/src/sys/ios/ios_paths.cpp)
+		# Build-time check that the redirects survive the standard headers.
+		target_sources(${_t} PRIVATE ${ROOT}/runtime/kernel/src/sys/ios/ios_paths_check.cpp)
+	endforeach()
+
 	# CMake makes iOS executables bundles by default; this one is assembled below.
 	set_target_properties(EXE_Lithtech PROPERTIES MACOSX_BUNDLE FALSE)
 

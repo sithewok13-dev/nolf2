@@ -195,5 +195,37 @@ static inline void _ftime(struct _timeb *tb)
 }
 #endif
 
+// ★ iOS: FILE NAMES IGNORE CASE, AS THEY DO ON A MAC. The iPhone's file system
+// is case-sensitive; a Mac's is not, and the game asks for names in whatever
+// case it was written with ("Profiles\\default.prf", "autoexec.cfg") while the
+// player's retail files are often upper case (PROFILES\\DEFAULT.PRF). So every
+// direct file access below goes through runtime/kernel/src/sys/ios/ios_paths.cpp,
+// which tries the exact name first and only then matches each folder and file
+// name ignoring case. Files inside the .rez archives are not affected (the
+// archive code already ignores case).
+#if defined(LT_IOS)
+#include <stdio.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <dirent.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
+FILE *ltios_fopen(const char *pPath, const char *pMode);
+int   ltios_stat(const char *pPath, struct stat *pBuf);
+DIR  *ltios_opendir(const char *pPath);
+int   ltios_mkdir(const char *pPath, mode_t nMode);
+// The path naming what exists on disk, matched ignoring case, '\\' read as '/'.
+// Parts that don't exist yet are kept as given (for files about to be made).
+void  ltios_ResolvePath(const char *pPath, char *pOut, size_t nOut);
+#ifdef __cplusplus
+}
+#endif
+#define fopen(...)   ltios_fopen(__VA_ARGS__)
+#define stat(...)    ltios_stat(__VA_ARGS__)
+#define opendir(...) ltios_opendir(__VA_ARGS__)
+#define mkdir(...)   ltios_mkdir(__VA_ARGS__)
+#endif // LT_IOS
+
 #endif // !_WIN32
 #endif // __LT_MSVC_CRT_COMPAT_H__

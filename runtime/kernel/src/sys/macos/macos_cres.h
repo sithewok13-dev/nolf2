@@ -33,4 +33,17 @@ LTMacResModule *LTMacCRes_GetDefault();
 // Release the cached module (engine shutdown).
 void LTMacCRes_Term();
 
+// The built-in English text: the string tables of the cres.dll sources in this
+// repository (NOLF2/ClientRes), turned into a table at build time by
+// macbuild/tools/rc_strings.py. Used only when the player's own cres.dll is not
+// found, so the menus still have their text and the game its default profile
+// name (CProfileMgr::Init fails without one, and the game stops at start-up).
+struct LTBuiltinCResString
+{
+	unsigned int m_nID;
+	const char  *m_pText;
+};
+extern const LTBuiltinCResString g_aLTBuiltinCRes[];
+extern const unsigned int        g_nLTBuiltinCRes;
+
 #endif // __MACOS_CRES_H__

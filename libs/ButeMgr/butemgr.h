@@ -667,10 +667,18 @@ inline bool CButeMgr::Parse(void* pData, unsigned long size, const char* cryptKe
 // path directly through the C++ streams, so normalize it here.
 static inline std::string ButeMgr_NormalizePath(const char* p)
 {
+#if defined(LT_IOS)
+	// iOS: also match the file and folder names ignoring case, as a Mac's file
+	// system does (runtime/kernel/src/sys/ios/ios_paths.cpp).
+	char szResolved[1024];
+	ltios_ResolvePath(p ? p : "", szResolved, sizeof(szResolved));
+	return std::string(szResolved);
+#else
 	std::string s(p ? p : "");
 	for (std::string::size_type i = 0; i < s.size(); ++i)
 		if (s[i] == '\\') s[i] = '/';
 	return s;
+#endif
 }
 #endif
 
