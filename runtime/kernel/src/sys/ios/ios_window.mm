@@ -90,7 +90,12 @@ namespace {
     // Touches are queued as they arrive from UIKit and handed to the game in
     // LTMacWin_PumpEvents, inside the engine's frame, as macOS does with its
     // NSEvent queue -- so the game never sees input in the middle of a frame.
-    enum EIOSInput { IN_MOVE, IN_DOWN, IN_UP, IN_LOOK, IN_ESCAPE };
+    enum EIOSInput { IN_MOVE, IN_DOWN, IN_UP, IN_LOOK, IN_ESCAPE, IN_USE };
+
+    // IN_USE holds the Use key (E) down this long, so the game's once-a-frame
+    // look at the keys is sure to see it.
+    const double kUseHoldSeconds = 0.12;
+    double g_fUseReleaseAt = 0;
     struct SIOSInput { EIOSInput m_eType; float m_fX, m_fY; };
     std::vector<SIOSInput> g_aInput;
 
@@ -114,6 +119,8 @@ namespace {
     CGPoint  m_LastPoint;
     UIView*  m_pTouchMarks;      // touch markers (test builds), above the game
     CGPoint  m_LastMarked;       // last move that got a marker
+    CGPoint  m_DownPoint;        // where the mouse finger went down, and when
+    double   m_fDownTime;
 }
 
 + (Class)layerClass { return [CAMetalLayer class]; }
@@ -214,6 +221,8 @@ namespace {
         m_pMouseTouch = t;
         m_LastPoint   = [t locationInView:self];
         m_LastMarked  = m_LastPoint;
+        m_DownPoint   = m_LastPoint;
+        m_fDownTime   = CACurrentMediaTime();
         [self markTouch:m_LastPoint color:[UIColor greenColor] radius:22 filled:NO];
         [self logTouch:"down" at:m_LastPoint];
         if (!LTMacWin_EngineWantsCursorLock()) {
@@ -245,6 +254,15 @@ namespace {
     CGPoint pt = [m_pMouseTouch locationInView:self];
     [self markTouch:pt color:[UIColor redColor] radius:14 filled:NO];
     [self logTouch:"up" at:pt];
+    // ★ In play, a quick tap that hardly moves is the Use key (E in the
+    // built-in key layout, ProfileMgr.cpp): it skips a cutscene and opens
+    // doors. A stand-in until the real touch controls.
+    if (LTMacWin_EngineWantsCursorLock() &&
+        CACurrentMediaTime() - m_fDownTime < 0.35 &&
+        hypot(pt.x - m_DownPoint.x, pt.y - m_DownPoint.y) < 15) {
+        g_aInput.push_back({ IN_USE, 0, 0 });
+        fprintf(stderr, "[touch] tap in play -> Use (E)\n");
+    }
     // Always release the button, even if the game switched to play meanwhile,
     // so a menu never sees a button stuck down.
     [self queue:IN_MOVE at:pt];
@@ -673,6 +691,13 @@ static NSString* LTIOS_BuildStampText(void) {
         fprintf(stderr, "[ios]   %s\n", [sName UTF8String]);
     chdir([gameDir fileSystemRepresentation]);
 
+    // The game keeps profiles (and its settings) in a Profiles folder, which a
+    // Windows install has from the start; a copy of just the archives does
+    // not, and then nothing the player sets could be saved. (Matched ignoring
+    // case, so an existing PROFILES folder is used.)
+    if (mkdir("Profiles", 0755) == 0)
+        fprintf(stderr, "[ios] made the Profiles folder\n");
+
     // The real client shell and the three game modules, from the app bundle
     // (the macOS launcher passes the same variables to the engine).
     NSString* fw = [[NSBundle mainBundle] privateFrameworksPath];
@@ -722,6 +747,11 @@ void LTMacWin_PumpEvents(void) {
 
     // Swap out first: the game's handlers may run long, and UIKit only adds
     // to the queue between frames anyway (same thread).
+    if (g_fUseReleaseAt > 0 && CACurrentMediaTime() >= g_fUseReleaseAt) {
+        g_fUseReleaseAt = 0;
+        LTMacInput_InjectKey(0x45 /*'E'*/, 18 /*DIK_E*/, false);
+    }
+
     std::vector<SIOSInput> aInput;
     aInput.swap(g_aInput);
     static bool s_bDown = false;
@@ -748,6 +778,10 @@ void LTMacWin_PumpEvents(void) {
             case IN_ESCAPE:
                 LTMacInput_InjectKey(0x1B /*VK_ESCAPE*/, 0x01 /*DIK_ESCAPE*/, true);
                 LTMacInput_InjectKey(0x1B, 0x01, false);
+                break;
+            case IN_USE:
+                LTMacInput_InjectKey(0x45 /*'E'*/, 18 /*DIK_E*/, true);
+                g_fUseReleaseAt = CACurrentMediaTime() + kUseHoldSeconds;
                 break;
         }
     }

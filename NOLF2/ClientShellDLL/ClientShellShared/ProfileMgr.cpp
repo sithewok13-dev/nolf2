@@ -295,6 +295,76 @@ static bool CreatePlayerGuid( char* pszPlayerGuid, int nSize )
 }
 
 #if defined(LT_MACOS)
+// Added (macOS / iOS port): the standard PC key layout, for a profile that has
+// to start without Profiles\default.prf (the bindings otherwise come only from
+// that file). Triggers are the input layer's own names
+// (runtime/kernel/src/sys/win/input.cpp): on the keyboard "##<n>" is a PC DIK
+// scancode, on the mouse "##3" / "##4" are buttons 0 / 1. The iOS touch layer
+// presses these same keys (ios_window.mm: a tap in play is Use, E).
+struct SProfileBuiltinBinding { int nCommandID; const char* pKey; const char* pMouse; };
+static const SProfileBuiltinBinding s_aProfileBuiltinBindings[] =
+{
+	{ COMMAND_ID_FORWARD,      "##17",  "" },     // W
+	{ COMMAND_ID_REVERSE,      "##31",  "" },     // S
+	{ COMMAND_ID_STRAFE_LEFT,  "##30",  "" },     // A
+	{ COMMAND_ID_STRAFE_RIGHT, "##32",  "" },     // D
+	{ COMMAND_ID_LEFT,         "##203", "" },     // Left arrow
+	{ COMMAND_ID_RIGHT,        "##205", "" },     // Right arrow
+	{ COMMAND_ID_RUN,          "##42",  "" },     // Left Shift
+	{ COMMAND_ID_JUMP,         "##57",  "" },     // Space
+	{ COMMAND_ID_DUCK,         "##46",  "" },     // C
+	{ COMMAND_ID_LEAN_LEFT,    "##16",  "" },     // Q
+	{ COMMAND_ID_FIRING,       "##29",  "##3" },  // Left Ctrl, left mouse button
+	{ COMMAND_ID_ACTIVATE,     "##18",  "" },     // E -- also skips cutscenes
+	{ COMMAND_ID_RELOAD,       "##19",  "" },     // R
+	{ COMMAND_ID_NEXT_WEAPON,  "##27",  "" },     // ]
+	{ COMMAND_ID_PREV_WEAPON,  "##26",  "" },     // [
+	{ COMMAND_ID_FLASHLIGHT,   "##33",  "" },     // F
+	{ COMMAND_ID_ZOOM_IN,      "##44",  "##4" },  // Z, right mouse button
+	{ COMMAND_ID_MISSION,      "##50",  "" },     // M
+};
+
+// The built-in profile: a [Bindings] section with a line for EVERY action
+// (the layout above, or empty), in the format default.prf uses
+// (Name = "keyboard@mouse@joystick"). Every action has to be present: the
+// profile saves by changing entries that exist (CButeMgr::SetString), so a
+// rebinding of an action missing here would not be kept.
+static std::string ProfileMgr_BuiltinProfileText()
+{
+	std::string sOut = "[Bindings]\r\n";
+	int nBound = 0;
+	for (int c = 0; c < g_kNumCommands; ++c)
+	{
+		if (g_CommandArray[c].nCommandID < 0)
+			continue;
+		char szName[64] = "";
+		LoadString(g_CommandArray[c].nActionStringID, szName, sizeof(szName));
+		if (!szName[0])
+			continue;
+		const char* pKey = "";
+		const char* pMouse = "";
+		for (size_t i = 0; i < sizeof(s_aProfileBuiltinBindings) / sizeof(s_aProfileBuiltinBindings[0]); ++i)
+		{
+			if (s_aProfileBuiltinBindings[i].nCommandID == g_CommandArray[c].nCommandID)
+			{
+				pKey   = s_aProfileBuiltinBindings[i].pKey;
+				pMouse = s_aProfileBuiltinBindings[i].pMouse;
+				++nBound;
+			}
+		}
+		sOut += szName;
+		sOut += " = \"";
+		sOut += pKey;
+		sOut += "@";
+		sOut += pMouse;
+		sOut += "@\"\r\n";
+	}
+	fprintf(stderr, "[profile] built-in PC key layout: %d actions bound\n", nBound);
+	return sOut;
+}
+#endif
+
+#if defined(LT_MACOS)
 // Added (macOS / iOS port): where a new profile's defaults come from.
 //
 // Profiles\default.prf is a loose file of a Windows install (the installer
@@ -331,11 +401,13 @@ static bool ProfileMgr_ParseDefaultPrf(CButeMgr& buteMgr, const std::string& dfn
 	}
 
 	fprintf(stderr, "[profile] %s not found (not in the game folder, not in the .rez archives):"
-	                " starting from an EMPTY profile -- default settings, no key bindings\n",
+	                " starting from the built-in profile -- default settings, the PC key layout\n",
 	        dfn.c_str());
-	static char s_szEmpty[] = "\n";
-	return buteMgr.Parse(s_szEmpty, 1, 0, dfn.c_str());
+	static std::string s_sBuiltin;
+	s_sBuiltin = ProfileMgr_BuiltinProfileText();
+	return buteMgr.Parse(&s_sBuiltin[0], (unsigned long)s_sBuiltin.size(), 0, dfn.c_str());
 }
+
 #endif
 
 LTBOOL CUserProfile::Init(const std::string& profileName, LTBOOL bCreate)
