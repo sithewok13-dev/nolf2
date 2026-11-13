@@ -324,6 +324,45 @@ static const SProfileBuiltinBinding s_aProfileBuiltinBindings[] =
 	{ COMMAND_ID_MISSION,      "##50",  "" },     // M
 };
 
+// What a Windows install's autoexec.cfg sets up before any profile: the
+// action names the bindings refer to (AddAction <name> <code>), the keyboard
+// and mouse switched on, and the mouse axes bound to the look actions (the
+// game sets their scale itself, CGameSettings::ImplementMouseSensitivity).
+// The input layer knows actions ONLY from these lines; without them a key bound
+// to "Activate" turns on nothing -- which is why a tap that pressed E did not
+// skip the first iPhone copy's cutscenes (it had no autoexec.cfg).
+// Only when there is no autoexec.cfg, so a real one is never second-guessed.
+static void ProfileMgr_EnsureInputSetup()
+{
+	if (FILE* fp = fopen("autoexec.cfg", "r"))
+	{
+		fclose(fp);
+		return;
+	}
+	char szCmd[160];
+	int nActions = 0;
+	for (int c = 0; c < g_kNumCommands; ++c)
+	{
+		if (g_CommandArray[c].nCommandID < 0)
+			continue;
+		char szName[64] = "";
+		LoadString(g_CommandArray[c].nActionStringID, szName, sizeof(szName));
+		if (!szName[0])
+			continue;
+		sprintf(szCmd, "AddAction %s %d", szName, g_CommandArray[c].nCommandID);
+		g_pLTClient->RunConsoleString(szCmd);
+		++nActions;
+	}
+	g_pLTClient->RunConsoleString("AddAction Axis1 -1");
+	g_pLTClient->RunConsoleString("AddAction Axis2 -2");
+	g_pLTClient->RunConsoleString("EnableDevice \"##keyboard\"");
+	g_pLTClient->RunConsoleString("EnableDevice \"##mouse\"");
+	g_pLTClient->RunConsoleString("RangeBind \"##mouse\" \"##x-axis\" 0 0 \"Axis1\"");
+	g_pLTClient->RunConsoleString("RangeBind \"##mouse\" \"##y-axis\" 0 0 \"Axis2\"");
+	fprintf(stderr, "[profile] no autoexec.cfg: registered %d actions, keyboard and mouse on, mouse look bound\n",
+	        nActions);
+}
+
 // The built-in profile: a [Bindings] section with a line for EVERY action
 // (the layout above, or empty), in the format default.prf uses
 // (Name = "keyboard@mouse@joystick"). Every action has to be present: the
@@ -1659,6 +1698,10 @@ LTBOOL CProfileMgr::Init()
 
 
 	g_pProfileMgr = this;
+
+#if defined(LT_MACOS)
+	ProfileMgr_EnsureInputSetup();
+#endif
 
 	SetDeviceData();
 
