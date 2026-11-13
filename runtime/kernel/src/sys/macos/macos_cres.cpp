@@ -312,6 +312,19 @@ LTMacResModule *LTMacCRes_GetDefault()
 		return g_pCResModule;
 	g_bCResTried = true;
 
+#ifdef LT_IOS
+	// ★ iOS: ALWAYS THE BUILT-IN TEXT. The game finds every line of its
+	// interface text by number, and the numbers are the ones in this
+	// repository's headers (NOLF2/ClientRes) -- which match the 1.3 cres.dll.
+	// An unpatched retail copy keeps an older cres.dll (in GAMEDLL.REZ) whose
+	// numbers differ: the first iPhone copy's main menu showed "Restoring the
+	// default settings...", "Status: Idle", "defuse" where "Single Player",
+	// "Multiplayer", "Options" belong. The built-in table is made from the same
+	// sources as the game code, so it always matches. (English only for now.)
+	fprintf(stderr, "[cres] iOS: using the built-in English text (the game files' cres.dll may be another version)\n");
+	return cres_UseBuiltin();
+#endif
+
 	if (!ilt_client_cres)
 		return 0;
 

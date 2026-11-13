@@ -58,6 +58,7 @@
 #include "ltmacwindow.h"
 #include "macos_input.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -111,6 +112,8 @@ namespace {
 @implementation LTIOSMetalView {
     UITouch* m_pMouseTouch;      // the finger acting as the mouse / look drag
     CGPoint  m_LastPoint;
+    UIView*  m_pTouchMarks;      // touch markers (test builds), above the game
+    CGPoint  m_LastMarked;       // last move that got a marker
 }
 
 + (Class)layerClass { return [CAMetalLayer class]; }
@@ -121,8 +124,49 @@ namespace {
         self.backgroundColor = [UIColor blackColor];
         CAMetalLayer* l = (CAMetalLayer*)self.layer;
         l.opaque = YES;
+
+        m_pTouchMarks = [[UIView alloc] initWithFrame:self.bounds];
+        m_pTouchMarks.userInteractionEnabled = NO;
+        m_pTouchMarks.backgroundColor = [UIColor clearColor];
+        m_pTouchMarks.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        [self addSubview:m_pTouchMarks];
     }
     return self;
+}
+
+// --------------------------------------------------------------------------
+// TOUCH MARKERS (test builds): every touch is drawn where it landed and
+// written to engine.log, so the owner can see -- and send -- where touches
+// reach the game. Green ring: finger down (a click). Red ring: finger up.
+// White dots: the path of a drag. Yellow ring: a second finger (Escape).
+// The log line gives the point on screen and the game pixel it became.
+// --------------------------------------------------------------------------
+- (void)markTouch:(CGPoint)pt color:(UIColor*)color radius:(CGFloat)r filled:(BOOL)bFilled {
+    CAShapeLayer* mark = [CAShapeLayer layer];
+    mark.path = [UIBezierPath bezierPathWithOvalInRect:CGRectMake(pt.x - r, pt.y - r, 2 * r, 2 * r)].CGPath;
+    mark.fillColor   = bFilled ? color.CGColor : [UIColor clearColor].CGColor;
+    mark.strokeColor = color.CGColor;
+    mark.lineWidth   = bFilled ? 0 : 3;
+    mark.opacity     = 0;   // the fade below ends here
+    [m_pTouchMarks.layer addSublayer:mark];
+
+    CABasicAnimation* fade = [CABasicAnimation animationWithKeyPath:@"opacity"];
+    fade.fromValue = @1.0;
+    fade.toValue   = @0.0;
+    fade.duration  = 2.0;
+    [CATransaction begin];
+    [CATransaction setCompletionBlock:^{ [mark removeFromSuperlayer]; }];
+    [mark addAnimation:fade forKey:@"fade"];
+    [CATransaction commit];
+}
+
+- (void)logTouch:(const char*)pWhat at:(CGPoint)pt {
+    CGPoint px = [self pixelPoint:pt];
+    CAMetalLayer* l = (CAMetalLayer*)self.layer;
+    fprintf(stderr, "[touch] %-6s screen (%.0f, %.0f) of %.0fx%.0f -> game pixel (%.0f, %.0f) of %.0fx%.0f%s\n",
+            pWhat, pt.x, pt.y, self.bounds.size.width, self.bounds.size.height,
+            px.x, px.y, l.drawableSize.width, l.drawableSize.height,
+            LTMacWin_EngineWantsCursorLock() ? " [in play: look]" : "");
 }
 
 - (CGFloat)renderScale {
@@ -162,10 +206,16 @@ namespace {
         if (m_pMouseTouch) {
             // A second finger while one is down: Escape.
             g_aInput.push_back({ IN_ESCAPE, 0, 0 });
+            CGPoint p2 = [t locationInView:self];
+            [self markTouch:p2 color:[UIColor yellowColor] radius:22 filled:NO];
+            [self logTouch:"escape" at:p2];
             continue;
         }
         m_pMouseTouch = t;
         m_LastPoint   = [t locationInView:self];
+        m_LastMarked  = m_LastPoint;
+        [self markTouch:m_LastPoint color:[UIColor greenColor] radius:22 filled:NO];
+        [self logTouch:"down" at:m_LastPoint];
         if (!LTMacWin_EngineWantsCursorLock()) {
             [self queue:IN_MOVE at:m_LastPoint];
             [self queue:IN_DOWN at:m_LastPoint];
@@ -176,6 +226,10 @@ namespace {
 - (void)touchesMoved:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event {
     if (!m_pMouseTouch || ![touches containsObject:m_pMouseTouch]) return;
     CGPoint pt = [m_pMouseTouch locationInView:self];
+    if (hypot(pt.x - m_LastMarked.x, pt.y - m_LastMarked.y) >= 12) {
+        [self markTouch:pt color:[UIColor whiteColor] radius:4 filled:YES];
+        m_LastMarked = pt;
+    }
     if (LTMacWin_EngineWantsCursorLock()) {
         // In play: relative motion in points, as a look drag.
         g_aInput.push_back({ IN_LOOK, (float)(pt.x - m_LastPoint.x),
@@ -189,6 +243,8 @@ namespace {
 - (void)endTouches:(NSSet<UITouch*>*)touches {
     if (!m_pMouseTouch || ![touches containsObject:m_pMouseTouch]) return;
     CGPoint pt = [m_pMouseTouch locationInView:self];
+    [self markTouch:pt color:[UIColor redColor] radius:14 filled:NO];
+    [self logTouch:"up" at:pt];
     // Always release the button, even if the game switched to play meanwhile,
     // so a menu never sees a button stuck down.
     [self queue:IN_MOVE at:pt];
